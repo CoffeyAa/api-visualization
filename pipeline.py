@@ -15,7 +15,7 @@ series_ids = os.getenv("SERIES_IDS").split(",") # type: ignore
 start_year = os.getenv("START_YEAR")
 end_year = os.getenv("END_YEAR")
 
-def fetch_data():
+def extract_data():
     """
     Uses pythons request library to make a post call to our API url.
     Raises HTTPError if unsuccessful.
@@ -33,7 +33,7 @@ def fetch_data():
 def transform_data(json_data)->pd.DataFrame:
     """
     Takes json data from API call and transforms it into a dataframe.
-    BLS has different cassing for catalog vs data k,v pairs (Very annoying) so everything has been converted to lower
+    BLS has different cassing for catalog vs data k,v pairs (Very annoying) so everything has been converted to lowercase
     """
     series = json_data.get("Results", {}).get("series", [])
     if not series:
@@ -53,22 +53,10 @@ def transform_data(json_data)->pd.DataFrame:
     df["latest"] = df["latest"].replace("true", True).astype(bool)
     return df
 
-def get_json_columns(df)->dict:
+def load_to_postgres(df, table_name="api_data"):
     """
-    Looks through the data frame for columns that 
-    need to be marked as JSONB type
-
-    Argumnets
-    ----------
-    df: pandas DF
+    Creates a sqlalchmey engine, converts the DF to sql, and loads it into the postgresql table
     """
-    jsonb_columns = {}
-    for col in df.columns:
-        if df[col].apply(lambda x: isinstance(x, (dict, list))).any():
-            jsonb_columns[col] = JSONB 
-    return jsonb_columns
-
-def save_to_postgres(df, table_name="api_data"):
     print("saving data to postgres...")
     engine = create_engine(database_url) # type: ignore
     with engine.begin() as connection:
@@ -94,9 +82,9 @@ def save_to_postgres(df, table_name="api_data"):
 def main():
     start = datetime.now()
     print("Running pipeline.....")
-    data = fetch_data()
+    data = extract_data()
     df = transform_data(data)
-    save_to_postgres(df)
+    load_to_postgres(df)
     end = datetime.now()
     print(f"Pipeline completed in {end-start} seconds")
 
