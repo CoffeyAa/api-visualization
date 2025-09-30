@@ -3,3 +3,4 @@ requests
 sqlalchemy
 python-dotenv
 psycopg2
+openpyxl
