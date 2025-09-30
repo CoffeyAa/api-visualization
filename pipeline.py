@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import json
 from datetime import datetime
-from sqlalchemy import create_engine, Integer, DateTime, Float, String, Boolean
+from sqlalchemy import create_engine, Integer, DateTime, Float, String, Boolean, Date
 from sqlalchemy.dialects.postgresql import JSONB
 from dotenv import load_dotenv
 
@@ -14,6 +14,7 @@ database_url = os.getenv("DATABASE_URL")
 series_ids = os.getenv("SERIES_IDS").split(",") # type: ignore
 start_year = os.getenv("START_YEAR")
 end_year = os.getenv("END_YEAR")
+excel_folder: str = os.getenv("EXCEL_FOLDER", "")
 
 def extract_data():
     """
@@ -51,33 +52,52 @@ def transform_data(json_data)->pd.DataFrame:
     df.columns = df.columns.str.lower()
     df["latest"] = df["latest"].fillna(False).astype(bool)
     df["latest"] = df["latest"].replace("true", True).astype(bool)
+    df["year"] = pd.to_datetime(df["year"], format="%Y")
     return df
 
 def load_to_postgres(df, table_name="api_data"):
     """
     Creates a sqlalchmey engine, converts the DF to sql, and loads it into the postgresql table
+    Rollsback connection if there is an error
+
+    Arguments
+    -----------
+    df: pd.DataFrame
+    table_name: postgres table to upload the data into (str)
     """
     print("saving data to postgres...")
     engine = create_engine(database_url) # type: ignore
     with engine.begin() as connection:
-        df.to_sql(
-            table_name, 
-            con=connection, 
-            if_exists="replace", 
-            index=False,
-            dtype={
-                "year": Integer,
-                "period": String,
-                "periodname": String,
-                "value": Float,
-                "latest": Boolean,
-                "footnotes": JSONB,
-                "seriesid": String,
-                "date": DateTime
-            }
-        )
+        try:
+            df.to_sql(
+                table_name, 
+                con=connection, 
+                if_exists="replace", 
+                index=False,
+                dtype={
+                    "year": Date,
+                    "period": String,
+                    "periodname": String,
+                    "value": Float,
+                    "latest": Boolean,
+                    "footnotes": JSONB,
+                    "seriesid": String,
+                    "date": DateTime
+                }
+            )
+        except Exception as e:
+            connection.rollback()
+            raise(e)
     engine.dispose()
     print(f"Saved {len(df)} rows to {table_name}")
+
+def save_to_excel(df):
+    today = datetime.today().date()
+    file_name = f"InflationData_{today}.xlsx"
+    file_path = os.path.join(excel_folder, file_name)
+    print("Creating excel export....")
+    df.to_excel(file_path, sheet_name="BLS Data", index=False)
+    print(f"Saved excel report name: {file_name}")
 
 def main():
     start = datetime.now()
@@ -85,6 +105,7 @@ def main():
     data = extract_data()
     df = transform_data(data)
     load_to_postgres(df)
+    save_to_excel(df)
     end = datetime.now()
     print(f"Pipeline completed in {end-start} seconds")
 
